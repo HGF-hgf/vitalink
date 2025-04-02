@@ -130,7 +130,7 @@
 import { useState, useEffect } from "react";
 
 export default function FormChatbot() {
-  const [formData, setFormData] = useState({ name: "", phone: "", age: "", symptoms: "", department: "" });
+  const [formData, setFormData] = useState({ name: "", cccd:"", dob: "", gender:"", province:"", district:"", ward:"", address:"", phone: "", symptoms: "", department: "" });
   const [chatHistory, setChatHistory] = useState([]);
   const [message, setMessage] = useState(""); // State for the input chat box
   const [loading, setLoading] = useState(false);
@@ -203,6 +203,23 @@ export default function FormChatbot() {
           value={formData.name}
           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
         />
+
+        <input
+         className="border p-2 w-full mt-2"
+         name = "dob"
+         placeholder = "Ngày sinh"
+         value = {formData.dob}
+         onChange = {(e) => setFormData({ ...formData, dob: e.target.value })}
+        />
+
+        <input
+            className="border p-2 w-full mt-2"
+            name = "gender"
+            placeholder = "Giới tính"
+            value = {formData.gender}
+            onChange = {(e) => setFormData({...formData, gender: e.target.value})}
+        />
+
         <input
           className="border p-2 w-full mt-2"
           name="phone"
@@ -210,13 +227,47 @@ export default function FormChatbot() {
           value={formData.phone}
           onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
         />
+
         <input
           className="border p-2 w-full mt-2"
-          name="age"
-          placeholder="Tuổi"
-          value={formData.age}
-          onChange={(e) => setFormData({ ...formData, age: e.target.value })}
+          name="cccd"
+          placeholder="Số Căn cước công dân"
+          value={formData.cccd}
+          onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
         />
+        <input
+            className="border p-2 w-full mt-2"
+            name = "province"
+            placeholder = "Tỉnh/Thành"
+            value = {formData.province}
+            onChange = {(e) => setFormData({...formData, province: e.target.value})}
+        />
+
+        <input
+            className="border p-2 w-full mt-2"
+            name = "district"
+            placeholder = "Quận/Huyện"
+            value = {formData.district}
+            onChange = {(e) => setFormData({...formData, district: e.target.value})}
+        />
+
+        <input
+            className="border p-2 w-full mt-2"
+            name = "ward"
+            placeholder = "Xã/Phường"
+            value = {formData.ward}
+            onChange = {(e) => setFormData({...formData, ward: e.target.value})}
+        />
+
+        <input
+            className="border p-2 w-full mt-2"
+            name = "address"
+            placeholder = "Địa chỉ"
+            value = {formData.address}
+            onChange = {(e) => setFormData({...formData, address: e.target.value})}
+        />
+
+
         <input
           className="border p-2 w-full mt-2"
           name="symptoms"

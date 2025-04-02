@@ -47,76 +47,118 @@ def get_response(question: str) -> str:
 @app.websocket("/api/chat")
 async def chat(websocket: WebSocket):
     await websocket.accept()
-    # Gán thuộc tính cho WebSocket
     websocket.formData = {}
-    websocket.chat_history = []  # Lịch sử chat riêng cho mỗi client
+    websocket.chat_history = []  
     clients.append(websocket)
     try:
-        # Gửi lịch sử chat ban đầu (nếu có)
         await websocket.send_text(json.dumps([message.dict() for message in websocket.chat_history]))
         while True:
             message = await websocket.receive_text()
             if message == "refresh":
-                websocket.chat_history = []  # Chỉ xóa lịch sử của client này
-                await websocket.send_text(json.dumps([]))  # Gửi lịch sử rỗng về client
+                websocket.chat_history = []  
+                await websocket.send_text(json.dumps([]))  
             else:
                 await handle_message(websocket, message)
     except WebSocketDisconnect:
         handle_disconnect(websocket)
 
 async def handle_message(websocket: WebSocket, message: str):
-    # Thêm tin nhắn của người dùng vào lịch sử
     websocket.chat_history.append(Message(message=message, sender="You"))
     await broadcast_messages(websocket)
     
-    # Tạo prompt với lịch sử chat
     prompt = generate_prompt(websocket, message)
     response = get_response(prompt)
     print(f"Raw response: {response}")
     
-    # Phân tích phản hồi JSON từ bot
     result = json.loads(response)
     websocket.formData = merge_form_data(websocket.formData, result)
     
-    # Thêm phản hồi của bot vào lịch sử
     websocket.chat_history.append(Message(message=result["reply"], sender="Bot"))
     await send_final_form(websocket, websocket.formData, result)
 
 async def broadcast_messages(websocket: WebSocket):
-    # Chỉ gửi lịch sử chat cho client hiện tại
     await websocket.send_text(json.dumps([message.dict() for message in websocket.chat_history]))
-
+    
 def generate_prompt(websocket: WebSocket, message: str) -> str:
-    required_fields = ["name", "age", "phone", "symptoms", "department"]
+    personal_fields = ["name", "dob", "gender", "cccd", "province", "district", "ward", "address", "phone"]
+    medical_fields = ["symptoms", "department"]
+    all_required_fields = personal_fields + medical_fields
+
     field_labels = {
         "name": "họ tên",
-        "age": "tuổi",
+        "dob": "ngày sinh",
+        "gender": "giới tính",
+        "cccd": "số CCCD",
+        "province": "tỉnh/thành",
+        "district": "quận/huyện",
+        "ward": "xã/phường",
+        "address": "địa chỉ",
         "phone": "số điện thoại",
         "symptoms": "triệu chứng",
         "department": "chuyên khoa khám"
     }
-    missing_fields = [
-        field for field in required_fields
-        if field not in websocket.formData or not websocket.formData.get(field)
-    ]
-    missing_field_labels = [field_labels[field] for field in missing_fields]
-    
-    # Tạo lịch sử chat dưới dạng chuỗi
-    chat_history_str = "\n".join([f"{msg.sender}: {msg.message}" for msg in websocket.chat_history])
-    
-    return (
-        f"Lịch sử chat:\n{chat_history_str}\n"
-        f"Người dùng vừa nói: '{message}'. "
-        f"Dữ liệu hiện tại của form: {websocket.formData}. "
-        "Form đăng ký khám bệnh bao gồm các trường: name (họ tên), age (tuổi), phone (số điện thoại), symptoms (triệu chứng), department (chuyên khoa khám). "
-        f"Các trường còn thiếu thông tin là: {', '.join(missing_field_labels) if missing_field_labels else 'không có'}. "
-        "Hãy phân tích câu của người dùng và trích xuất thông tin để điền vào các trường còn thiếu. "
-        "Nếu người dùng không cung cấp đủ thông tin, hãy yêu cầu họ cung cấp thêm các trường còn thiếu. "
-        "Nếu tất cả các trường đã được điền, hãy trả về thông báo xác nhận. "
-        "Trả về kết quả dưới dạng JSON hợp lệ với hai phần: "
-        "'form' chứa các trường đã điền và 'reply' chứa câu trả lời tự nhiên bằng tiếng Việt."
-    )
 
+    missing_personal = [field for field in personal_fields if field not in websocket.formData or not websocket.formData.get(field)]
+    missing_medical = [field for field in medical_fields if field not in websocket.formData or not websocket.formData.get(field)]
+    missing_field_labels = [field_labels[field] for field in (missing_personal + missing_medical)]
+
+    chat_history_str = "\n".join([f"{msg.sender}: {msg.message}" for msg in websocket.chat_history])
+
+    filled_info = "\n".join(
+        [f"- {field_labels[field]}: {websocket.formData[field]}" for field in all_required_fields if field in websocket.formData and websocket.formData[field]]
+    ) if any(field in websocket.formData and websocket.formData[field] for field in all_required_fields) else "Chưa có thông tin nào được điền sẵn."
+
+    next_field = None
+    next_field_label = None
+    if missing_personal: 
+        next_field = missing_personal[0]
+        next_field_label = field_labels[next_field]
+    elif missing_medical: 
+        next_field = missing_medical[0]
+        next_field_label = field_labels[next_field]
+
+    if next_field:  
+        return (
+            f"Lịch sử chat:\n{chat_history_str}\n"
+            f"Người dùng vừa nói: '{message}'. "
+            f"Dữ liệu hiện tại của form: {websocket.formData}. "
+            f"Thông tin đã điền sẵn:\n{filled_info}\n"
+            "Form đăng ký khám bệnh bao gồm các trường: "
+            "Thông tin cá nhân: name (họ tên), dob (ngày sinh), gender (giới tính), cccd (số CCCD), province (tỉnh/thành), district (quận/huyện), ward (xã/phường), address (địa chỉ), phone (số điện thoại); "
+            "Thông tin y tế: symptoms (triệu chứng), department (chuyên khoa khám). "
+            f"Các trường còn thiếu thông tin là: {', '.join(missing_field_labels) if missing_field_labels else 'không có'}. "
+            f"Hãy phân tích câu của người dùng và trích xuất thông tin để điền vào trường '{next_field_label}'. "
+            f"Nếu người dùng không cung cấp thông tin cho '{next_field_label}', hãy yêu cầu họ cung cấp thông tin đó. "
+            "Trả về kết quả dưới dạng JSON hợp lệ với hai phần: "
+            "'form' chứa các trường đã điền (chỉ cập nhật trường liên quan) và 'reply' chứa câu trả lời tự nhiên bằng tiếng Việt, bắt đầu bằng: 'Tôi thấy bạn đã điền: {filled_info}' nếu có thông tin điền sẵn."
+        )
+    else: 
+        confirmation_message = (
+            "Tất cả thông tin đã được điền. Dưới đây là thông tin bạn đã cung cấp:\n"
+            f"- Họ tên: {websocket.formData.get('name', '')}\n"
+            f"- Ngày sinh: {websocket.formData.get('dob', '')}\n"
+            f"- Giới tính: {websocket.formData.get('gender', '')}\n"
+            f"- Số CCCD: {websocket.formData.get('cccd', '')}\n"
+            f"- Tỉnh/thành: {websocket.formData.get('province', '')}\n"
+            f"- Quận/huyện: {websocket.formData.get('district', '')}\n"
+            f"- Xã/phường: {websocket.formData.get('ward', '')}\n"
+            f"- Địa chỉ: {websocket.formData.get('address', '')}\n"
+            f"- Số điện thoại: {websocket.formData.get('phone', '')}\n"
+            f"- Triệu chứng: {websocket.formData.get('symptoms', '')}\n"
+            f"- Chuyên khoa khám: {websocket.formData.get('department', '')}\n"
+            "Bạn có muốn xác nhận thông tin này không? (Trả lời 'có' hoặc 'không')"
+        )
+        return (
+            f"Lịch sử chat:\n{chat_history_str}\n"
+            f"Người dùng vừa nói: '{message}'. "
+            f"Dữ liệu hiện tại của form: {websocket.formData}. "
+            f"Thông tin đã điền sẵn:\n{filled_info}\n"
+            "Form đăng ký khám bệnh bao gồm các trường: "
+            "Thông tin cá nhân: name (họ tên), dob (ngày sinh), gender (giới tính), phone (số điện thoại), cccd (số CCCD), province (tỉnh/thành), district (quận/huyện), ward (xã/phường), address (địa chỉ); "
+            "Thông tin y tế: symptoms (triệu chứng), department (chuyên khoa khám). "
+            "Tất cả các trường đã được điền. "
+            f"Hãy trả về câu trả lời dưới dạng JSON với 'form' chứa dữ liệu hiện tại và 'reply' là: '{confirmation_message}'."
+        )
 def merge_form_data(form_data: dict, result: dict) -> dict:
     sanitized_form = {
         key: "" if value is None else value
