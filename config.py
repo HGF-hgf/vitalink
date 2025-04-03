@@ -20,7 +20,7 @@ class ChatRequest(BaseModel):
 clients: List[WebSocket] = []
 
 # Khởi tạo OpenAI client (thay bằng key của bạn)
-openai.api_key = "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"
+# openai.api_key = "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"
 
 app.add_middleware(
     CORSMiddleware,
