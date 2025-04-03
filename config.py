@@ -20,8 +20,7 @@ class ChatRequest(BaseModel):
 clients: List[WebSocket] = []
 
 # Khởi tạo OpenAI client (thay bằng key của bạn)
-# openai.api_key =  "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"
-  # Thay bằng key thực tế của bạn
+openai.api_key = "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"
 
 app.add_middleware(
     CORSMiddleware,
@@ -44,6 +43,10 @@ def get_response(question: str) -> str:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+def get_filled_fields(form_data: dict) -> dict:
+    """Trả về một dictionary chỉ chứa các trường đã được điền (khác rỗng hoặc None)."""
+    return {key: value for key, value in form_data.items() if value and value.strip() != ""}
+
 @app.websocket("/api/chat")
 async def chat(websocket: WebSocket):
     await websocket.accept()
@@ -63,22 +66,49 @@ async def chat(websocket: WebSocket):
         handle_disconnect(websocket)
 
 async def handle_message(websocket: WebSocket, message: str):
-    websocket.chat_history.append(Message(message=message, sender="You"))
-    await broadcast_messages(websocket)
+    try:
+        data = json.loads(message)
+        
+        if data.get("type") == "formUpdate":
+            received_form_data = data.get("data", {})
+            websocket.formData = merge_form_data(websocket.formData, {"form": received_form_data})
+            filled_fields = get_filled_fields(websocket.formData)
+            # Không gửi reply nếu không cần thiết
+            await websocket.send_text(json.dumps({"form": filled_fields}))
+        
+        elif data.get("type") == "chat" or "type" not in data:
+            websocket.chat_history.append(Message(message=data.get("message", message), sender="You"))
+            await broadcast_messages(websocket)
+            
+            prompt = generate_prompt(websocket, data.get("message", message))
+            response = get_response(prompt)
+            print(f"Raw response: {response}")
+            
+            result = json.loads(response)
+            websocket.formData = merge_form_data(websocket.formData, result)
+            
+            websocket.chat_history.append(Message(message=result["reply"], sender="Bot"))
+            await send_final_form(websocket, websocket.formData, result)
     
-    prompt = generate_prompt(websocket, message)
-    response = get_response(prompt)
-    print(f"Raw response: {response}")
-    
-    result = json.loads(response)
-    websocket.formData = merge_form_data(websocket.formData, result)
-    
-    websocket.chat_history.append(Message(message=result["reply"], sender="Bot"))
-    await send_final_form(websocket, websocket.formData, result)
-
+    except json.JSONDecodeError:
+        # Xử lý tin nhắn chat thông thường
+        websocket.chat_history.append(Message(message=message, sender="You"))
+        await broadcast_messages(websocket)
+        
+        prompt = generate_prompt(websocket, message)
+        response = get_response(prompt)
+        result = json.loads(response)
+        websocket.formData = merge_form_data(websocket.formData, result)
+        
+        websocket.chat_history.append(Message(message=result["reply"], sender="Bot"))
+        await send_final_form(websocket, websocket.formData, result)
+    except Exception as e:
+        print(f"Error: {e}")
+        await websocket.send_text(json.dumps({"reply": "Đã xảy ra lỗi, vui lòng thử lại."}))
+        
 async def broadcast_messages(websocket: WebSocket):
     await websocket.send_text(json.dumps([message.dict() for message in websocket.chat_history]))
-    
+
 def generate_prompt(websocket: WebSocket, message: str) -> str:
     personal_fields = ["name", "dob", "gender", "cccd", "province", "district", "ward", "address", "phone"]
     medical_fields = ["symptoms", "department"]
@@ -97,7 +127,6 @@ def generate_prompt(websocket: WebSocket, message: str) -> str:
         "symptoms": "triệu chứng",
         "department": "chuyên khoa khám"
     }
-
     missing_personal = [field for field in personal_fields if field not in websocket.formData or not websocket.formData.get(field)]
     missing_medical = [field for field in medical_fields if field not in websocket.formData or not websocket.formData.get(field)]
     missing_field_labels = [field_labels[field] for field in (missing_personal + missing_medical)]
@@ -159,6 +188,7 @@ def generate_prompt(websocket: WebSocket, message: str) -> str:
             "Tất cả các trường đã được điền. "
             f"Hãy trả về câu trả lời dưới dạng JSON với 'form' chứa dữ liệu hiện tại và 'reply' là: '{confirmation_message}'."
         )
+
 def merge_form_data(form_data: dict, result: dict) -> dict:
     sanitized_form = {
         key: "" if value is None else value

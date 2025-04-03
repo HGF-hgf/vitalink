@@ -1,7 +1,7 @@
 from typing import List
 import openai
 
-client ="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"
+client ="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"
 
 class Reflection():
     def __init__(self, llm):
