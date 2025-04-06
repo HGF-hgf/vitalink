@@ -8,6 +8,7 @@ from typing import List, Dict
 import json
 import uvicorn
 import uuid
+from test import evaluate_tests, get_search_results
 
 mongo_client = MongoClient("mongodb+srv://ngvh1110:1234@cluster0.ff8rq.mongodb.net/")
 db = mongo_client["Vitalink"]
@@ -23,6 +24,10 @@ class ChatRequest(BaseModel):
     message: str
     formData: dict = {}
 
+class SubmitRequest(BaseModel):
+    user_id: str
+    symptoms: str
+
 class UserIdRequest(BaseModel):
     user_id: str
 
@@ -30,7 +35,6 @@ class UserIdRequest(BaseModel):
 clients: List[WebSocket] = []
 
 # Khởi tạo OpenAI client (thay bằng key của bạn)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -41,7 +45,7 @@ app.add_middleware(
 
 def get_response(question: str) -> str:
     try:
-        response = openai.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "Bạn là một chatbot trợ giúp điền form đăng ký khám bệnh tại bệnh viện."},
@@ -260,6 +264,34 @@ async def get_chat_history(user_id: str):
         return {"user_id": user_id, "chat_history": chat_doc["chat_history"]}
     else:
         raise HTTPException(status_code=404, detail="Không tìm thấy lịch sử chat cho user_id này.")
+
+@app.post("/api/submit_tests")
+async def submit_tests(request: SubmitRequest):
+    user_id = request.user_id
+    symptoms = request.symptoms
+
+    test_list = get_search_results(symptoms)
+    test_list_array = [test.strip() for test in test_list.split("\n") if test.strip()]  
+
+    for client in clients:
+        if hasattr(client, "user_id") and client.user_id == user_id:
+            reply = f"Dựa trên triệu chứng '{symptoms}', tôi đề xuất các xét nghiệm sau:\n" + "\n".join([f"- {test}" for test in test_list_array]) + "\nBạn muốn tôi giải thích thêm về xét nghiệm nào không?"
+            client.chat_history.append(Message(message=reply, sender="Bot"))
+            await client.send_text(json.dumps({
+                "user_id": user_id,
+                "chat_history": [msg.dict() for msg in client.chat_history],
+                "tests": test_list_array  
+            }))
+            collection.update_one(
+                {"user_id": user_id},
+                {"$set": {"chat_history": [msg.dict() for msg in client.chat_history]}},
+                upsert=True
+            )
+            break
+    else:
+        raise HTTPException(status_code=404, detail="Không tìm thấy kết nối WebSocket cho user_id này.")
+
+    return {"user_id": user_id, "tests": test_list_array}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=5001)

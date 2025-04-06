@@ -1,7 +1,6 @@
 from typing import List
 import openai
 
-
 class Reflection():
     def __init__(self, llm):
         self.llm = llm
