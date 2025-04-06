@@ -1,7 +1,6 @@
 from typing import List
 import openai
 
-# client = "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"
 
 class Reflection():
     def __init__(self, llm):
