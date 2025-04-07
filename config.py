@@ -9,12 +9,11 @@ import json
 import uvicorn
 import uuid
 from test import get_search_results
-from dotenv import load_dotenv
 import os
+from dotenv import load_dotenv
 load_dotenv()
 
 mongo_client = MongoClient(os.getenv("MONGODB_URI"))
-openai.api_key = os.getenv("OPENAI_API_KEY")
 db = mongo_client["Vitalink"]
 collection = db["Chat_history"]
 
@@ -28,17 +27,18 @@ class ChatRequest(BaseModel):
     message: str
     formData: dict = {}
 
-class SubmitRequest(BaseModel):
-    user_id: str
-    symptoms: str
-
 class UserIdRequest(BaseModel):
     user_id: str
 
+class SubmitRequest(BaseModel):
+    user_id: str
+    symptoms: str
 # Danh sách các client WebSocket
 clients: List[WebSocket] = []
 
 # Khởi tạo OpenAI client (thay bằng key của bạn)
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -109,11 +109,14 @@ async def handle_message(websocket: WebSocket, message: str):
             await websocket.send_text(json.dumps({"form": filled_fields}))
         
         elif data.get("type") == "chat" or "type" not in data:
+            websocket.user_id = data.get("user_id")
             if not hasattr(websocket, "user_id"):
                 user_id = str(uuid.uuid4())
                 websocket.user_id = user_id
+            
             websocket.chat_history.append(Message(message=data.get("message", message), sender="You"))
             await broadcast_messages(websocket)
+   
             
             prompt = generate_prompt(websocket, data.get("message", message))
             response = get_response(prompt)
