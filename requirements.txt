@@ -1,4 +1,6 @@
 google-genai
+google
+google-api-core
 openai
 uvicorn
 fastapi
