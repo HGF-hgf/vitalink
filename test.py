@@ -81,7 +81,7 @@ def evaluate_tests(query, test_list):
     - Tên xét nghiệm 2
     ... """
     
-    response = openai.ChatCompletion.create(
+    response = openai.chat.completions.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": "Bạn là một chatbot trợ giúp điền form đăng ký khám bệnh tại bệnh viện."},
