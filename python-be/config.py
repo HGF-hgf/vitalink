@@ -8,9 +8,13 @@ from typing import List, Dict
 import json
 import uvicorn
 import uuid
-from test import evaluate_tests, get_search_results
+from test import get_search_results
+from dotenv import load_dotenv
+import os
+load_dotenv()
 
-mongo_client = MongoClient("mongodb+srv://ngvh1110:1234@cluster0.ff8rq.mongodb.net/")
+mongo_client = MongoClient(os.getenv("MONGODB_URI"))
+openai.api_key = os.getenv("OPENAI_API_KEY")
 db = mongo_client["Vitalink"]
 collection = db["Chat_history"]
 

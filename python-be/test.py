@@ -8,9 +8,13 @@ import time
 from google.api_core import exceptions
 import openai
 from google.genai import types
+import os
+import dotenv
+dotenv.load_dotenv()
 
-
-db_client = MongoClient('mongodb+srv://ngvh1110:1234@cluster0.ff8rq.mongodb.net/')
+db_client = MongoClient(os.getenv("MONGODB_URI"))
+client = genai.Client(api_key= os.getenv("GOOGLE_API_KEY"))
+openai.api_key = os.getenv("OPENAI_API_KEY")
 db = db_client['Vitalink']
 collection = db['test']
 

@@ -1,6 +1,10 @@
 from typing import List
 import openai
+import os
+import dotenv
+dotenv.load_dotenv()
 
+openai.api_key = os.getenv("OPENAI_API_KEY")
 class Reflection():
     def __init__(self, llm):
         self.llm = llm
