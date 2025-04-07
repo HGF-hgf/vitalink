@@ -1,8 +1,8 @@
+google-genai
 openai
 uvicorn
 fastapi
 pydantic
 pymongo
-google-genai
 scikit-learn
 python-multipart
