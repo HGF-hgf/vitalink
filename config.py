@@ -33,6 +33,8 @@ class UserIdRequest(BaseModel):
 class SubmitRequest(BaseModel):
     user_id: str
     symptoms: str
+    
+
 # Danh sách các client WebSocket
 clients: List[WebSocket] = []
 
