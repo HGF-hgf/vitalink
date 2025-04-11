@@ -31,7 +31,7 @@ class Reflection():
         print(higher_level_summaries_prompt)
 
         completion = openai.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[
                 {
                     "role": "user",
