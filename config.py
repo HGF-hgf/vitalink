@@ -278,7 +278,7 @@ def generate_prompt(websocket: WebSocket, message: str) -> str:
             "Nếu không có thông tin cho '{next_field_label}', trả lời tự nhiên bằng tiếng Việt để yêu cầu người dùng cung cấp, ví dụ: "
             "'Cảm ơn bạn đã cung cấp thông tin. Bạn có thể cho tôi biết {next_field_label} của bạn không?' hoặc "
             "'Dạ, tôi đã ghi nhận. Bạn vui lòng cho tôi biết thêm về {next_field_label} được không?' "
-            "Nếu có thông tin, xác nhận tự nhiên, ví dụ: 'Oke, tôi đã ghi {next_field_label} là ...' "
+            # "Nếu có thông tin, xác nhận tự nhiên, ví dụ: 'Oke, tôi đã ghi {next_field_label} là ...' "
             "Trả về kết quả dạng JSON với: "
             "'form' chứa các trường đã điền (chỉ cập nhật trường liên quan trong đúng category) và 'reply' chứa câu trả lời tự nhiên bằng tiếng Việt.\n"
             "Ví dụ:\n"
