@@ -36,7 +36,7 @@ class SubmitRequest(BaseModel):
 # Danh sách các client WebSocket
 clients: List[WebSocket] = []
 
-# Khởi tạo OpenAI client (thay bằng key của bạn)
+# Khởi tạo OpenAI client
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app.add_middleware(
@@ -95,9 +95,9 @@ async def chat(websocket: WebSocket):
     }
     websocket.chat_history = []
     websocket.last_asked_field = None
-    websocket.last_asked_category = None  # Thêm để theo dõi category hiện tại
+    websocket.last_asked_category = None
     websocket.ask_count = 0
-    websocket.last_message = None  # Lưu tin nhắn cuối cùng để tránh lặp
+    websocket.last_message = None
     clients.append(websocket)
     
     try:
@@ -156,6 +156,13 @@ async def handle_message(websocket: WebSocket, message: str):
             result = json.loads(response)
             websocket.formData = merge_form_data(websocket.formData, result)
             
+            # Cập nhật last_asked_field và last_asked_category dựa trên result["form"]
+            if "form" in result and any(result["form"].values()):
+                for category in result["form"]:
+                    for field in result["form"][category]:
+                        websocket.last_asked_field = field
+                        websocket.last_asked_category = category
+            
             # Kiểm tra nếu form rỗng và đang hỏi lại cùng một trường
             current_field = websocket.last_asked_field
             current_category = websocket.last_asked_category
@@ -167,8 +174,8 @@ async def handle_message(websocket: WebSocket, message: str):
                 print(f"Ask count: {websocket.ask_count}, Current field: {current_field}")
                 if websocket.ask_count >= 3:
                     websocket.ask_count = 0
-                    personal_fields = ["name", "dob", "gender", "cccd", "province", "district", "ward", "address", "phone", "symptoms"]  # Thêm symptoms vào personal
-                    medical_fields = []  # Bỏ symptoms khỏi medical
+                    personal_fields = ["name", "dob", "gender", "cccd", "province", "district", "ward", "address", "phone", "symptoms"]
+                    medical_fields = []
                     symptom_detail_fields = ["site", "onset", "character", "radiation", "alleviating", "timing", "exacerbating", "severity", "previous_check"]
                     history_fields = ["position", "last", "occasion", "vadap", "cangay", "duration", "spread"]
                     family_fields = ["ditruyen", "last", "occasion", "vadap"]
@@ -179,21 +186,38 @@ async def handle_message(websocket: WebSocket, message: str):
                     missing_history = [field for field in history_fields if field not in websocket.formData["history"] or not websocket.formData["history"].get(field)]
                     missing_family = [field for field in family_fields if field not in websocket.formData["family"] or not websocket.formData["family"].get(field)]
 
+                    # Đảm bảo hỏi tuần tự trong personal trước khi chuyển category
                     if missing_personal:
-                        next_field = missing_personal[0] if missing_personal[0] != current_field else missing_personal[1] if len(missing_personal) > 1 else None
-                        next_category = "personal"
+                        # Tìm trường tiếp theo chưa được hỏi trong personal
+                        for field in personal_fields:
+                            if field in missing_personal:
+                                next_field = field
+                                next_category = "personal"
+                                break
                     elif missing_medical:
-                        next_field = missing_medical[0] if missing_medical[0] != current_field else missing_medical[1] if len(missing_medical) > 1 else None
-                        next_category = "medical"
-                    elif missing_symptom_details and "symptoms" in websocket.formData["personal"] and websocket.formData["personal"]["symptoms"]:  # Sửa điều kiện để kiểm tra symptoms trong personal
-                        next_field = missing_symptom_details[0] if missing_symptom_details[0] != current_field else missing_symptom_details[1] if len(missing_symptom_details) > 1 else None
-                        next_category = "symptom_details"
+                        for field in medical_fields:
+                            if field in missing_medical:
+                                next_field = field
+                                next_category = "medical"
+                                break
+                    elif missing_symptom_details and "symptoms" in websocket.formData["personal"] and websocket.formData["personal"]["symptoms"]:
+                        for field in symptom_detail_fields:
+                            if field in missing_symptom_details:
+                                next_field = field
+                                next_category = "symptom_details"
+                                break
                     elif missing_history:
-                        next_field = missing_history[0] if missing_history[0] != current_field else missing_history[1] if len(missing_history) > 1 else None
-                        next_category = "history"
+                        for field in history_fields:
+                            if field in missing_history:
+                                next_field = field
+                                next_category = "history"
+                                break
                     elif missing_family:
-                        next_field = missing_family[0] if missing_family[0] != current_field else missing_family[1] if len(missing_family) > 1 else None
-                        next_category = "family"
+                        for field in family_fields:
+                            if field in missing_family:
+                                next_field = field
+                                next_category = "family"
+                                break
 
                     if next_field:
                         field_labels = {
@@ -210,7 +234,6 @@ async def handle_message(websocket: WebSocket, message: str):
                             "last": "xung quanh có tiền sử bệnh nào có tính di truyền không", "occasion": "gia đình có ai có bệnh lý nội khoa không",
                             "vadap": "hàng xóm có ai tiếp xúc mà có triệu chứng tương tự không"
                         }
-                        # Gửi thông báo next nếu chuyển category
                         if current_category != next_category:
                             await websocket.send_text(json.dumps({
                                 "type": "next",
@@ -225,16 +248,8 @@ async def handle_message(websocket: WebSocket, message: str):
                         websocket.last_asked_category = None
             else:
                 websocket.ask_count = 0
-                # Xác định current_field và current_category từ result["form"]
-                current_field = None
-                current_category = None
-                for category in result["form"]:
-                    for field in result["form"][category]:
-                        current_field = field
-                        current_category = category
-
-                personal_fields = ["name", "dob", "gender", "cccd", "province", "district", "ward", "address", "phone", "symptoms"]  # Thêm symptoms vào personal
-                medical_fields = []  # Bỏ symptoms khỏi medical
+                personal_fields = ["name", "dob", "gender", "cccd", "province", "district", "ward", "address", "phone", "symptoms"]
+                medical_fields = []
                 symptom_detail_fields = ["site", "onset", "character", "radiation", "alleviating", "timing", "exacerbating", "severity", "previous_check"]
                 history_fields = ["position", "last", "occasion", "vadap", "cangay", "duration", "spread"]
                 family_fields = ["ditruyen", "last", "occasion", "vadap"]
@@ -245,24 +260,39 @@ async def handle_message(websocket: WebSocket, message: str):
                 missing_history = [field for field in history_fields if field not in websocket.formData["history"] or not websocket.formData["history"].get(field)]
                 missing_family = [field for field in family_fields if field not in websocket.formData["family"] or not websocket.formData["family"].get(field)]
 
+                # Đảm bảo hỏi tuần tự trong personal trước khi chuyển category
                 if missing_personal:
-                    next_field = missing_personal[0]
-                    next_category = "personal"
+                    for field in personal_fields:
+                        if field in missing_personal:
+                            next_field = field
+                            next_category = "personal"
+                            break
                 elif missing_medical:
-                    next_field = missing_medical[0]
-                    next_category = "medical"
-                elif missing_symptom_details and "symptoms" in websocket.formData["personal"] and websocket.formData["personal"]["symptoms"]:  # Sửa điều kiện để kiểm tra symptoms trong personal
-                    next_field = missing_symptom_details[0]
-                    next_category = "symptom_details"
+                    for field in medical_fields:
+                        if field in missing_medical:
+                            next_field = field
+                            next_category = "medical"
+                            break
+                elif missing_symptom_details and "symptoms" in websocket.formData["personal"] and websocket.formData["personal"]["symptoms"]:
+                    for field in symptom_detail_fields:
+                        if field in missing_symptom_details:
+                            next_field = field
+                            next_category = "symptom_details"
+                            break
                 elif missing_history:
-                    next_field = missing_history[0]
-                    next_category = "history"
+                    for field in history_fields:
+                        if field in missing_history:
+                            next_field = field
+                            next_category = "history"
+                            break
                 elif missing_family:
-                    next_field = missing_family[0]
-                    next_category = "family"
+                    for field in family_fields:
+                        if field in missing_family:
+                            next_field = field
+                            next_category = "family"
+                            break
 
                 if next_field:
-                    # Gửi thông báo next nếu chuyển category
                     if current_category != next_category:
                         await websocket.send_text(json.dumps({
                             "type": "next",
@@ -292,6 +322,12 @@ async def handle_message(websocket: WebSocket, message: str):
         result = json.loads(response)
         websocket.formData = merge_form_data(websocket.formData, result)
         
+        if "form" in result and any(result["form"].values()):
+            for category in result["form"]:
+                for field in result["form"][category]:
+                    websocket.last_asked_field = field
+                    websocket.last_asked_category = category
+        
         current_field = websocket.last_asked_field
         current_category = websocket.last_asked_category
         next_field = None
@@ -302,8 +338,8 @@ async def handle_message(websocket: WebSocket, message: str):
             print(f"Ask count: {websocket.ask_count}, Current field: {current_field}")
             if websocket.ask_count >= 3:
                 websocket.ask_count = 0
-                personal_fields = ["name", "dob", "gender", "cccd", "province", "district", "ward", "address", "phone", "symptoms"]  # Thêm symptoms vào personal
-                medical_fields = []  # Bỏ symptoms khỏi medical
+                personal_fields = ["name", "dob", "gender", "cccd", "province", "district", "ward", "address", "phone", "symptoms"]
+                medical_fields = []
                 symptom_detail_fields = ["site", "onset", "character", "radiation", "alleviating", "timing", "exacerbating", "severity", "previous_check"]
                 history_fields = ["position", "last", "occasion", "vadap", "cangay", "duration", "spread"]
                 family_fields = ["ditruyen", "last", "occasion", "vadap"]
@@ -315,20 +351,35 @@ async def handle_message(websocket: WebSocket, message: str):
                 missing_family = [field for field in family_fields if field not in websocket.formData["family"] or not websocket.formData["family"].get(field)]
 
                 if missing_personal:
-                    next_field = missing_personal[0] if missing_personal[0] != current_field else missing_personal[1] if len(missing_personal) > 1 else None
-                    next_category = "personal"
+                    for field in personal_fields:
+                        if field in missing_personal:
+                            next_field = field
+                            next_category = "personal"
+                            break
                 elif missing_medical:
-                    next_field = missing_medical[0] if missing_medical[0] != current_field else missing_medical[1] if len(missing_medical) > 1 else None
-                    next_category = "medical"
-                elif missing_symptom_details and "symptoms" in websocket.formData["personal"] and websocket.formData["personal"]["symptoms"]:  # Sửa điều kiện để kiểm tra symptoms trong personal
-                    next_field = missing_symptom_details[0] if missing_symptom_details[0] != current_field else missing_symptom_details[1] if len(missing_symptom_details) > 1 else None
-                    next_category = "symptom_details"
+                    for field in medical_fields:
+                        if field in missing_medical:
+                            next_field = field
+                            next_category = "medical"
+                            break
+                elif missing_symptom_details and "symptoms" in websocket.formData["personal"] and websocket.formData["personal"]["symptoms"]:
+                    for field in symptom_detail_fields:
+                        if field in missing_symptom_details:
+                            next_field = field
+                            next_category = "symptom_details"
+                            break
                 elif missing_history:
-                    next_field = missing_history[0] if missing_history[0] != current_field else missing_history[1] if len(missing_history) > 1 else None
-                    next_category = "history"
+                    for field in history_fields:
+                        if field in missing_history:
+                            next_field = field
+                            next_category = "history"
+                            break
                 elif missing_family:
-                    next_field = missing_family[0] if missing_family[0] != current_field else missing_family[1] if len(missing_family) > 1 else None
-                    next_category = "family"
+                    for field in family_fields:
+                        if field in missing_family:
+                            next_field = field
+                            next_category = "family"
+                            break
 
                 if next_field:
                     field_labels = {
@@ -345,7 +396,6 @@ async def handle_message(websocket: WebSocket, message: str):
                         "last": "xung quanh có tiền sử bệnh nào có tính di truyền không", "occasion": "gia đình có ai có bệnh lý nội khoa không",
                         "vadap": "hàng xóm có ai tiếp xúc mà có triệu chứng tương tự không"
                     }
-                    # Gửi thông báo next nếu chuyển category
                     if current_category != next_category:
                         await websocket.send_text(json.dumps({
                             "type": "next",
@@ -360,16 +410,8 @@ async def handle_message(websocket: WebSocket, message: str):
                     websocket.last_asked_category = None
         else:
             websocket.ask_count = 0
-            # Xác định current_field và current_category từ result["form"]
-            current_field = None
-            current_category = None
-            for category in result["form"]:
-                for field in result["form"][category]:
-                    current_field = field
-                    current_category = category
-
-            personal_fields = ["name", "dob", "gender", "cccd", "province", "district", "ward", "address", "phone", "symptoms"]  # Thêm symptoms vào personal
-            medical_fields = []  # Bỏ symptoms khỏi medical
+            personal_fields = ["name", "dob", "gender", "cccd", "province", "district", "ward", "address", "phone", "symptoms"]
+            medical_fields = []
             symptom_detail_fields = ["site", "onset", "character", "radiation", "alleviating", "timing", "exacerbating", "severity", "previous_check"]
             history_fields = ["position", "last", "occasion", "vadap", "cangay", "duration", "spread"]
             family_fields = ["ditruyen", "last", "occasion", "vadap"]
@@ -381,23 +423,37 @@ async def handle_message(websocket: WebSocket, message: str):
             missing_family = [field for field in family_fields if field not in websocket.formData["family"] or not websocket.formData["family"].get(field)]
 
             if missing_personal:
-                next_field = missing_personal[0]
-                next_category = "personal"
+                for field in personal_fields:
+                    if field in missing_personal:
+                        next_field = field
+                        next_category = "personal"
+                        break
             elif missing_medical:
-                next_field = missing_medical[0]
-                next_category = "medical"
-            elif missing_symptom_details and "symptoms" in websocket.formData["personal"] and websocket.formData["personal"]["symptoms"]:  # Sửa điều kiện để kiểm tra symptoms trong personal
-                next_field = missing_symptom_details[0]
-                next_category = "symptom_details"
+                for field in medical_fields:
+                    if field in missing_medical:
+                        next_field = field
+                        next_category = "medical"
+                        break
+            elif missing_symptom_details and "symptoms" in websocket.formData["personal"] and websocket.formData["personal"]["symptoms"]:
+                for field in symptom_detail_fields:
+                    if field in missing_symptom_details:
+                        next_field = field
+                        next_category = "symptom_details"
+                        break
             elif missing_history:
-                next_field = missing_history[0]
-                next_category = "history"
+                for field in history_fields:
+                    if field in missing_history:
+                        next_field = field
+                        next_category = "history"
+                        break
             elif missing_family:
-                next_field = missing_family[0]
-                next_category = "family"
+                for field in family_fields:
+                    if field in missing_family:
+                        next_field = field
+                        next_category = "family"
+                        break
 
             if next_field:
-                # Gửi thông báo next nếu chuyển category
                 if current_category != next_category:
                     await websocket.send_text(json.dumps({
                         "type": "next",
@@ -425,8 +481,8 @@ async def broadcast_messages(websocket: WebSocket):
     }))
 
 def generate_prompt(websocket: WebSocket, message: str) -> str:
-    personal_fields = ["name", "dob", "gender", "cccd", "province", "district", "ward", "address", "phone", "symptoms"]  # Thêm symptoms vào personal
-    medical_fields = []  # Bỏ symptoms khỏi medical
+    personal_fields = ["name", "dob", "gender", "cccd", "province", "district", "ward", "address", "phone", "symptoms"]
+    medical_fields = []
     symptom_detail_fields = [
         "site", "onset", "character", "radiation", "alleviating", 
         "timing", "exacerbating", "severity", "previous_check"
@@ -505,26 +561,42 @@ def generate_prompt(websocket: WebSocket, message: str) -> str:
     next_field_label = None
     next_category = None
 
+    # Đảm bảo hỏi tuần tự trong personal trước khi chuyển category
     if missing_personal:
-        next_field = missing_personal[0]
-        next_field_label = field_labels[next_field]
-        next_category = "personal"
+        for field in personal_fields:
+            if field in missing_personal:
+                next_field = field
+                next_field_label = field_labels[next_field]
+                next_category = "personal"
+                break
     elif missing_medical:
-        next_field = missing_medical[0]
-        next_field_label = field_labels[next_field]
-        next_category = "medical"
-    elif missing_symptom_details and "symptoms" in websocket.formData["personal"] and websocket.formData["personal"]["symptoms"]:  # Sửa điều kiện để kiểm tra symptoms trong personal
-        next_field = missing_symptom_details[0]
-        next_field_label = field_labels[next_field]
-        next_category = "symptom_details"
+        for field in medical_fields:
+            if field in missing_medical:
+                next_field = field
+                next_field_label = field_labels[next_field]
+                next_category = "medical"
+                break
+    elif missing_symptom_details and "symptoms" in websocket.formData["personal"] and websocket.formData["personal"]["symptoms"]:
+        for field in symptom_detail_fields:
+            if field in missing_symptom_details:
+                next_field = field
+                next_field_label = field_labels[next_field]
+                next_category = "symptom_details"
+                break
     elif missing_history:
-        next_field = missing_history[0]
-        next_field_label = field_labels[next_field]
-        next_category = "history"
+        for field in history_fields:
+            if field in missing_history:
+                next_field = field
+                next_field_label = field_labels[next_field]
+                next_category = "history"
+                break
     elif missing_family:
-        next_field = missing_family[0]
-        next_field_label = field_labels[next_field]
-        next_category = "family"
+        for field in family_fields:
+            if field in missing_family:
+                next_field = field
+                next_field_label = field_labels[next_field]
+                next_category = "family"
+                break
 
     if next_field:
         return (
@@ -534,22 +606,34 @@ def generate_prompt(websocket: WebSocket, message: str) -> str:
             f"Thông tin đã điền: {filled_info}\n"
             "Form đăng ký khám bệnh bao gồm:\n"
             "- Thông tin cá nhân: name (họ tên), dob (ngày sinh), gender (giới tính), cccd (số CCCD), province (tỉnh/thành), district (quận/huyện), ward (xã/phường), address (địa chỉ), phone (số điện thoại), symptoms (triệu chứng)\n"
-            "- Thông tin y tế: không có\n"  # Bỏ symptoms khỏi medical
+            "- Thông tin y tế: không có\n"
             "- Chi tiết triệu chứng: site (vị trí), onset (thời điểm khởi phát), character (tính chất), radiation (lan tỏa/kèm theo), alleviating (yếu tố làm giảm), timing (thời gian/tần suất), exacerbating (yếu tố làm nặng), severity (mức độ 1-10), previous_check (đã từng khám triệu chứng này ở đâu trước đó chưa)\n"
             "- Tiền sử bệnh: position (bệnh lý đã mắc trước đó), last (phẫu thuật bao giờ chưa), occasion (dị ứng), vadap (tiền sử dịch tễ), cangay (tiền sử thai sản, kinh nguyệt), duration (rượu bia, chất kích thích), spread (thói quen sinh hoạt, chế độ ăn)\n"
             "- Tiền sử gia đình: ditruyen (gia đình có tiền sử bệnh nào có tính di truyền không), last (xung quanh có tiền sử bệnh nào có tính di truyền không), occasion (gia đình có ai có bệnh lý nội khoa không), vadap (hàng xóm có ai tiếp xúc mà có triệu chứng tương tự không)\n"
             f"Các trường còn thiếu: {', '.join(missing_field_labels) if missing_field_labels else 'không còn'}. "
             f"Nhiệm vụ: Phân tích câu của người dùng và trích xuất thông tin để điền vào trường '{next_field_label}' (thuộc '{next_category}'). "
-            "Nếu không có thông tin cho '{next_field_label}', trả lời tự nhiên bằng tiếng Việt để yêu cầu người dùng cung cấp, ví dụ: "
-            "'Cảm ơn bạn đã cung cấp thông tin. Bạn có thể cho tôi biết {next_field_label} của bạn không?' hoặc "
-            "'Dạ, tôi đã ghi nhận. Bạn vui lòng cho tôi biết thêm về {next_field_label} được không?' "
-            "Nếu có thông tin, xác nhận tự nhiên, ví dụ: 'Oke, tôi đã ghi {next_field_label} là ...' "
+            "Nếu không có thông tin cho '{next_field_label}', trả lời tự nhiên bằng tiếng Việt để yêu cầu người dùng cung cấp. "
+            "Nếu có thông tin, xác nhận thông tin đã ghi nhận một cách tự nhiên và hỏi câu hỏi tiếp theo. "
+            "Dưới đây là các mẫu câu để xác nhận thông tin đã ghi nhận (chọn ngẫu nhiên hoặc phù hợp với ngữ cảnh, tránh lặp lại liên tục):\n"
+            "- 'Oke, tôi đã ghi nhận {field_label} là {value}.'\n"
+            "- 'Cảm ơn bạn, tôi đã lưu {field_label} là {value}.'\n"
+            "- 'Được rồi, tôi đã cập nhật {field_label} là {value}.'\n"
+            "- 'Thông tin {field_label} là {value} đã được lưu, cảm ơn bạn!'\n"
+            "- 'Tôi đã ghi lại {field_label} là {value}, cảm ơn nhé!'\n"
+            "Dưới đây là các mẫu câu để hỏi câu hỏi tiếp theo (chọn ngẫu nhiên hoặc phù hợp với ngữ cảnh, tránh lặp lại liên tục):\n"
+            "- 'Tiếp theo, bạn có thể cho tôi biết {next_field_label} của bạn không?'\n"
+            "- 'Bạn cho tôi biết thêm về {next_field_label} được không?'\n"
+            "- 'Cho tôi biết {next_field_label} của bạn nhé?'\n"
+            "- 'Bạn có thể chia sẻ thêm về {next_field_label} không?'\n"
+            "- 'Tiếp theo, bạn có thể nói thêm về {next_field_label} không?'\n"
+            "Hãy sử dụng các mẫu câu trên một cách linh hoạt, đảm bảo câu trả lời tự nhiên, thân thiện, và phù hợp với ngữ cảnh y tế. "
+            "Tránh lặp lại cùng một mẫu câu liên tục, dựa vào lịch sử chat để thay đổi cách diễn đạt nếu cần. "
             "Trả về kết quả dạng JSON với: "
             "'form' chứa các trường đã điền (chỉ cập nhật trường liên quan trong đúng category) và 'reply' chứa câu trả lời tự nhiên bằng tiếng Việt.\n"
             "Ví dụ:\n"
-            "1. Tin nhắn: 'Tên tôi là Nguyễn Văn A' -> {\"form\": {\"personal\": {\"name\": \"Nguyễn Văn A\"}}, \"reply\": \"Oke, tôi đã ghi họ tên là Nguyễn Văn A.\"}\n"
-            "2. Tin nhắn: 'Đau ở trán' -> {\"form\": {\"symptom_details\": {\"site\": \"trán\"}}, \"reply\": \"Oke, tôi đã ghi vị trí triệu chứng là trán.\"}\n"
-            "3. Tin nhắn: 'Tôi không biết' -> {\"form\": {}, \"reply\": \"Cảm ơn bạn. Bạn có thể cho tôi biết {next_field_label} không?\"}"
+            "1. Tin nhắn: 'Tên tôi là Nguyễn Văn A' -> {\"form\": {\"personal\": {\"name\": \"Nguyễn Văn A\"}}, \"reply\": \"Cảm ơn bạn, tôi đã lưu họ tên là Nguyễn Văn A. Bạn cho tôi biết thêm về ngày sinh được không?\"}\n"
+            "2. Tin nhắn: 'Đau ở trán' -> {\"form\": {\"symptom_details\": {\"site\": \"trán\"}}, \"reply\": \"Được rồi, tôi đã cập nhật vị trí triệu chứng là trán. Tiếp theo, bạn có thể nói thêm về thời điểm khởi phát triệu chứng không?\"}\n"
+            "3. Tin nhắn: 'Tôi không biết' -> {\"form\": {}, \"reply\": \"Không sao đâu, bạn có thể chia sẻ thêm về {next_field_label} không?\"}"
         )
     else:
         confirmation_message = (
@@ -563,7 +647,7 @@ def generate_prompt(websocket: WebSocket, message: str) -> str:
             f"- Xã/phường: {websocket.formData['personal'].get('ward', '')}\n"
             f"- Địa chỉ: {websocket.formData['personal'].get('address', '')}\n"
             f"- Số điện thoại: {websocket.formData['personal'].get('phone', '')}\n"
-            f"- Triệu chứng: {websocket.formData['personal'].get('symptoms', '')}\n"  # Sửa để lấy symptoms từ personal
+            f"- Triệu chứng: {websocket.formData['personal'].get('symptoms', '')}\n"
             f"- Vị trí triệu chứng: {websocket.formData['symptom_details'].get('site', '')}\n"
             f"- Thời điểm khởi phát: {websocket.formData['symptom_details'].get('onset', '')}\n"
             f"- Tính chất: {websocket.formData['symptom_details'].get('character', '')}\n"
